@@ -206,7 +206,7 @@ func getETCDConfig() (*etcdcv3.Config, error) {
 	etcdURLs := strings.Split(etcdURLsStr, ",")
 	firstURL := strings.ToLower(etcdURLs[0])
 	config := etcdv3.Config{
-		Endpoints: etcdURLs
+		Endpoints: etcdURLs,
 	}
 	etcdUser, etcdUserDefined := os.LookupEnv("ETCD_USER")
 	etcdPass, etcdPassDefined := os.LookupEnv("ETCD_PASS")
