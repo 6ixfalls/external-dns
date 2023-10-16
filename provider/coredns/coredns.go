@@ -228,7 +228,7 @@ func getETCDConfig() (*etcdcv3.Config, error) {
 			return nil, err
 		}
 		config.TLS = tlsConfig
-	} else {
+	} else if !strings.HasPrefix(firstURL, "http://") {
 		return nil, errors.New("etcd URLs must start with either http:// or https://")
 	}
 	return &config, nil
