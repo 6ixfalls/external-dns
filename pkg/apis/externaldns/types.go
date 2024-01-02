@@ -28,7 +28,7 @@ import (
 
 	"sigs.k8s.io/external-dns/endpoint"
 
-	"github.com/alecthomas/kingpin"
+	"github.com/alecthomas/kingpin/v2"
 	"github.com/sirupsen/logrus"
 
 	"sigs.k8s.io/external-dns/source"
@@ -135,6 +135,8 @@ type Config struct {
 	OCIConfigFile                      string
 	OCICompartmentOCID                 string
 	OCIAuthInstancePrincipal           bool
+	OCIZoneScope                       string
+	OCIZoneCacheDuration               time.Duration
 	InMemoryZones                      []string
 	OVHEndpoint                        string
 	OVHApiRateLimit                    int
@@ -175,7 +177,7 @@ type Config struct {
 	ResolveServiceLoadBalancerHostname bool
 	RFC2136Host                        string
 	RFC2136Port                        int
-	RFC2136Zone                        string
+	RFC2136Zone                        []string
 	RFC2136Insecure                    bool
 	RFC2136GSSTSIG                     bool
 	RFC2136KerberosRealm               string
@@ -213,6 +215,8 @@ type Config struct {
 	WebhookProviderReadTimeout         time.Duration
 	WebhookProviderWriteTimeout        time.Duration
 	WebhookServer                      bool
+	TraefikDisableLegacy               bool
+	TraefikDisableNew                  bool
 }
 
 var defaultConfig = &Config{
@@ -291,6 +295,8 @@ var defaultConfig = &Config{
 	InfobloxCreatePTR:           false,
 	InfobloxCacheDuration:       0,
 	OCIConfigFile:               "/etc/kubernetes/oci.yaml",
+	OCIZoneScope:                "GLOBAL",
+	OCIZoneCacheDuration:        0 * time.Second,
 	InMemoryZones:               []string{},
 	OVHEndpoint:                 "ovh-eu",
 	OVHApiRateLimit:             20,
@@ -329,7 +335,7 @@ var defaultConfig = &Config{
 	CFPassword:                  "",
 	RFC2136Host:                 "",
 	RFC2136Port:                 0,
-	RFC2136Zone:                 "",
+	RFC2136Zone:                 []string{},
 	RFC2136Insecure:             false,
 	RFC2136GSSTSIG:              false,
 	RFC2136KerberosRealm:        "",
@@ -365,6 +371,8 @@ var defaultConfig = &Config{
 	WebhookProviderReadTimeout:  5 * time.Second,
 	WebhookProviderWriteTimeout: 10 * time.Second,
 	WebhookServer:               false,
+	TraefikDisableLegacy:        false,
+	TraefikDisableNew:           false,
 }
 
 // NewConfig returns new Config object
@@ -452,6 +460,8 @@ func (cfg *Config) ParseFlags(args []string) error {
 	app.Flag("default-targets", "Set globally default host/IP that will apply as a target instead of source addresses. Specify multiple times for multiple targets (optional)").StringsVar(&cfg.DefaultTargets)
 	app.Flag("target-net-filter", "Limit possible targets by a net filter; specify multiple times for multiple possible nets (optional)").StringsVar(&cfg.TargetNetFilter)
 	app.Flag("exclude-target-net", "Exclude target nets (optional)").StringsVar(&cfg.ExcludeTargetNets)
+	app.Flag("traefik-disable-legacy", "Disable listeners on Resources under the traefik.containo.us API Group").Default(strconv.FormatBool(defaultConfig.TraefikDisableLegacy)).BoolVar(&cfg.TraefikDisableLegacy)
+	app.Flag("traefik-disable-new", "Disable listeners on Resources under the traefik.io API Group").Default(strconv.FormatBool(defaultConfig.TraefikDisableNew)).BoolVar(&cfg.TraefikDisableNew)
 
 	// Flags related to providers
 	providers := []string{"akamai", "alibabacloud", "aws", "aws-sd", "azure", "azure-dns", "azure-private-dns", "bluecat", "civo", "cloudflare", "coredns", "designate", "digitalocean", "dnsimple", "dyn", "exoscale", "gandi", "godaddy", "google", "ibmcloud", "infoblox", "inmemory", "linode", "ns1", "oci", "ovh", "pdns", "pihole", "plural", "rcodezero", "rdns", "rfc2136", "safedns", "scaleway", "skydns", "tencentcloud", "transip", "ultradns", "vinyldns", "vultr", "webhook"}
@@ -523,7 +533,9 @@ func (cfg *Config) ParseFlags(args []string) error {
 	app.Flag("dyn-min-ttl", "Minimal TTL (in seconds) for records. This value will be used if the provided TTL for a service/ingress is lower than this.").IntVar(&cfg.DynMinTTLSeconds)
 	app.Flag("oci-config-file", "When using the OCI provider, specify the OCI configuration file (required when --provider=oci").Default(defaultConfig.OCIConfigFile).StringVar(&cfg.OCIConfigFile)
 	app.Flag("oci-compartment-ocid", "When using the OCI provider, specify the OCID of the OCI compartment containing all managed zones and records.  Required when using OCI IAM instance principal authentication.").StringVar(&cfg.OCICompartmentOCID)
+	app.Flag("oci-zone-scope", "When using OCI provider, filter for zones with this scope (optional, options: GLOBAL, PRIVATE). Defaults to GLOBAL, setting to empty value will target both.").Default(defaultConfig.OCIZoneScope).EnumVar(&cfg.OCIZoneScope, "", "GLOBAL", "PRIVATE")
 	app.Flag("oci-auth-instance-principal", "When using the OCI provider, specify whether OCI IAM instance principal authentication should be used (instead of key-based auth via the OCI config file).").Default(strconv.FormatBool(defaultConfig.OCIAuthInstancePrincipal)).BoolVar(&cfg.OCIAuthInstancePrincipal)
+	app.Flag("oci-zones-cache-duration", "When using the OCI provider, set the zones list cache TTL (0s to disable).").Default(defaultConfig.OCIZoneCacheDuration.String()).DurationVar(&cfg.OCIZoneCacheDuration)
 	app.Flag("rcodezero-txt-encrypt", "When using the Rcodezero provider with txt registry option, set if TXT rrs are encrypted (default: false)").Default(strconv.FormatBool(defaultConfig.RcodezeroTXTEncrypt)).BoolVar(&cfg.RcodezeroTXTEncrypt)
 	app.Flag("inmemory-zone", "Provide a list of pre-configured zones for the inmemory provider; specify multiple times for multiple zones (optional)").Default("").StringsVar(&cfg.InMemoryZones)
 	app.Flag("ovh-endpoint", "When using the OVH provider, specify the endpoint (default: ovh-eu)").Default(defaultConfig.OVHEndpoint).StringVar(&cfg.OVHEndpoint)
@@ -557,7 +569,7 @@ func (cfg *Config) ParseFlags(args []string) error {
 	// Flags related to RFC2136 provider
 	app.Flag("rfc2136-host", "When using the RFC2136 provider, specify the host of the DNS server").Default(defaultConfig.RFC2136Host).StringVar(&cfg.RFC2136Host)
 	app.Flag("rfc2136-port", "When using the RFC2136 provider, specify the port of the DNS server").Default(strconv.Itoa(defaultConfig.RFC2136Port)).IntVar(&cfg.RFC2136Port)
-	app.Flag("rfc2136-zone", "When using the RFC2136 provider, specify the zone entry of the DNS server to use").Default(defaultConfig.RFC2136Zone).StringVar(&cfg.RFC2136Zone)
+	app.Flag("rfc2136-zone", "When using the RFC2136 provider, specify zone entries of the DNS server to use").StringsVar(&cfg.RFC2136Zone)
 	app.Flag("rfc2136-insecure", "When using the RFC2136 provider, specify whether to attach TSIG or not (default: false, requires --rfc2136-tsig-keyname and rfc2136-tsig-secret)").Default(strconv.FormatBool(defaultConfig.RFC2136Insecure)).BoolVar(&cfg.RFC2136Insecure)
 	app.Flag("rfc2136-tsig-keyname", "When using the RFC2136 provider, specify the TSIG key to attached to DNS messages (required when --rfc2136-insecure=false)").Default(defaultConfig.RFC2136TSIGKeyName).StringVar(&cfg.RFC2136TSIGKeyName)
 	app.Flag("rfc2136-tsig-secret", "When using the RFC2136 provider, specify the TSIG (base64) value to attached to DNS messages (required when --rfc2136-insecure=false)").Default(defaultConfig.RFC2136TSIGSecret).StringVar(&cfg.RFC2136TSIGSecret)

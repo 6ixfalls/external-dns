@@ -236,7 +236,7 @@ Follow the steps under [Deploy ExternalDNS](#deploy-externaldns) using either RB
 
 This is the preferred method as it implements [PoLP](https://csrc.nist.gov/glossary/term/principle_of_least_privilege) ([Principal of Least Privilege](https://csrc.nist.gov/glossary/term/principle_of_least_privilege)).
 
-**IMPORTANT**: This method requires using KSA (Kuberntes service account) and RBAC.
+**IMPORTANT**: This method requires using KSA (Kubernetes service account) and RBAC.
 
 This method requires deploying with RBAC.  See [Manifest (for clusters with RBAC enabled)](#manifest-for-clusters-with-rbac-enabled) when ready to deploy ExternalDNS.
 
@@ -414,7 +414,7 @@ spec:
     spec:
       containers:
         - name: external-dns
-          image: registry.k8s.io/external-dns/external-dns:v0.13.5
+          image: registry.k8s.io/external-dns/external-dns:v0.14.0
           args:
             - --source=service
             - --source=ingress
@@ -509,7 +509,7 @@ spec:
       serviceAccountName: external-dns
       containers:
         - name: external-dns
-          image: registry.k8s.io/external-dns/external-dns:v0.13.5
+          image: registry.k8s.io/external-dns/external-dns:v0.14.0
           args:
             - --source=service
             - --source=ingress
@@ -962,7 +962,7 @@ A simple way to implement randomised startup is with an init container:
     spec:
       initContainers:
       - name: init-jitter
-        image: registry.k8s.io/external-dns/external-dns:v0.13.5
+        image: registry.k8s.io/external-dns/external-dns:v0.14.0
         command:
         - /bin/sh
         - -c
