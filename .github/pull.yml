@@ -1,3 +1,5 @@
 version: "1"
 rules:
-  - mergeMethod: rebase
+  - base: master
+    upstream: kubernetes-sigs:master
+    mergeMethod: rebase
